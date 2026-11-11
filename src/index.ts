@@ -155,16 +155,18 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     if (typeof body.phone !== "string" || !/^\+[1-9]\d{7,14}$/.test(body.phone) || typeof body.countryCode !== "string" || !/^\+?\d{1,4}$/.test(body.countryCode)) {
       return json({ error: "Use an E.164 phone number and valid country code" }, 400);
     }
+    if (body.customerId) {
+      const customer = await env.DB.prepare("SELECT id FROM users WHERE id=? AND role='customer' AND status='active'").bind(body.customerId).first();
+      if (!customer) return json({ error: "Customer not found" }, 404);
+    }
     const id = uid();
     try {
       await env.DB.prepare("INSERT INTO phone_numbers(id,phone_e164,country_code,label,provider) VALUES(?,?,?,?,?)")
         .bind(id, body.phone, body.countryCode, (body.label || "").slice(0,80), (body.provider || "manual").slice(0,40)).run();
       if (body.customerId) {
-        const customer = await env.DB.prepare("SELECT id FROM users WHERE id=? AND role='customer' AND status='active'").bind(body.customerId).first();
-        if (!customer) return json({ error: "Customer not found" }, 404);
         await env.DB.prepare("INSERT INTO number_assignments(number_id,user_id) VALUES(?,?)").bind(id, body.customerId).run();
       }
-    } catch { return json({ error: "Could not add number; it may already exist" }, 409); }
+    } catch { return json({ error: "Could not add number; it may already exist or assignment failed" }, 409); }
     await audit(env, auth.user.id, "number.create", id);
     return json({ success: true, numberId: id }, 201);
   }
