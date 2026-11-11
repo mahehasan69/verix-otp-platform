@@ -57,7 +57,8 @@ async function currentUser(request: Request, env: Env): Promise<User | null> {
   ).bind(tokenHash).first<User>();
   return row?.status === "active" ? row : null;
 }
-async function requireUser(request: Request, env: Env) {
+type AuthResult = { user: User; response?: never } | { user?: never; response: Response };
+async function requireUser(request: Request, env: Env): Promise<AuthResult> {
   const user = await currentUser(request, env);
   return user ? { user } : { response: json({ error: "Authentication required" }, 401) };
 }
@@ -88,7 +89,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     if (!env.BOOTSTRAP_SECRET || request.headers.get("x-bootstrap-secret") !== env.BOOTSTRAP_SECRET) return json({ error: "Invalid bootstrap credential" }, 403);
     const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM users WHERE role='admin'").first<{count:number}>();
     if ((count?.count || 0) > 0) return json({ error: "Initial admin already exists" }, 409);
-    const body = await request.json<{email?:string;displayName?:string;password?:string}>().catch(() => ({}));
+    const body = await request.json<{email?:string;displayName?:string;password?:string}>().catch(() => ({} as never));
     if (!validEmail(body.email) || !validPassword(body.password) || typeof body.displayName !== "string" || body.displayName.trim().length < 2) {
       return json({ error: "Provide a valid email, display name, and password (at least 12 characters)" }, 400);
     }
@@ -100,7 +101,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/auth/login" && request.method === "POST") {
-    const body = await request.json<{email?:string;password?:string}>().catch(() => ({}));
+    const body = await request.json<{email?:string;password?:string}>().catch(() => ({} as never));
     if (!validEmail(body.email) || typeof body.password !== "string") return json({ error: "Email and password required" }, 400);
     const row = await env.DB.prepare("SELECT id,email,display_name,role,status,password_hash,password_salt FROM users WHERE email=? COLLATE NOCASE")
       .bind(body.email).first<User & {password_hash:string;password_salt:string}>();
@@ -135,7 +136,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (path === "/api/admin/providers" && request.method === "POST") {
     const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
-    const body = await request.json<{slug?:string;displayName?:string;integrationType?:string}>().catch(() => ({}));
+    const body = await request.json<{slug?:string;displayName?:string;integrationType?:string}>().catch(() => ({} as never));
     if (typeof body.slug !== "string" || !/^[a-z0-9][a-z0-9-]{1,39}$/.test(body.slug) ||
         typeof body.displayName !== "string" || body.displayName.trim().length < 2 ||
         !["webhook","manual"].includes(body.integrationType || "webhook")) {
@@ -169,7 +170,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (path === "/api/admin/users" && request.method === "POST") {
     const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
-    const body = await request.json<{email?:string;displayName?:string;password?:string}>().catch(() => ({}));
+    const body = await request.json<{email?:string;displayName?:string;password?:string}>().catch(() => ({} as never));
     if (!validEmail(body.email) || !validPassword(body.password) || typeof body.displayName !== "string" || body.displayName.trim().length < 2) {
       return json({ error: "Provide valid email, display name, and a password of at least 12 characters" }, 400);
     }
@@ -184,7 +185,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (path === "/api/admin/numbers" && request.method === "POST") {
     const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
-    const body = await request.json<{phone?:string;countryCode?:string;label?:string;providerId?:string;providerNumberId?:string;numberType?:string;customerId?:string}>().catch(() => ({}));
+    const body = await request.json<{phone?:string;countryCode?:string;label?:string;providerId?:string;providerNumberId?:string;numberType?:string;customerId?:string}>().catch(() => ({} as never));
     if (typeof body.phone !== "string" || !/^\+[1-9]\d{7,14}$/.test(body.phone) || typeof body.countryCode !== "string" || !/^\+?\d{1,4}$/.test(body.countryCode)) {
       return json({ error: "Use an E.164 phone number and valid country code" }, 400);
     }
@@ -214,7 +215,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (path === "/api/inbound/sms" && request.method === "POST") {
     if (!env.INBOUND_WEBHOOK_SECRET || request.headers.get("x-webhook-secret") !== env.INBOUND_WEBHOOK_SECRET) return json({ error: "Unauthorized webhook" }, 401);
-    const body = await request.json<{from?:string;to?:string;body?:string;providerMessageId?:string}>().catch(() => ({}));
+    const body = await request.json<{from?:string;to?:string;body?:string;providerMessageId?:string}>().catch(() => ({} as never));
     if (typeof body.from !== "string" || typeof body.to !== "string" || typeof body.body !== "string" || body.body.length > 5000) {
       return json({ error: "Invalid inbound SMS payload" }, 400);
     }
