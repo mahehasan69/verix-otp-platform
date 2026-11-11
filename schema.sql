@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS number_assignments (
   PRIMARY KEY (number_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_assignments_user ON number_assignments(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_assignments_single_customer ON number_assignments(number_id);
 
 CREATE TABLE IF NOT EXISTS inbound_messages (
   id TEXT PRIMARY KEY,
