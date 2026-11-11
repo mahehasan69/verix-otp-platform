@@ -19,9 +19,14 @@ const hex = (bytes: Uint8Array) => [...bytes].map(x => x.toString(16).padStart(2
 async function digest(value: string): Promise<string> {
   return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value))));
 }
+
+// Cloudflare Workers Web Crypto currently rejects PBKDF2 iteration counts above 100,000.
+// Keep registration and login on the same supported work factor.
+const PBKDF2_ITERATIONS = 100000;
+
 async function passwordHash(password: string, salt: string): Promise<string> {
   const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: fromB64(salt), iterations: 310000, hash: "SHA-256" }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: fromB64(salt), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" }, key, 256);
   return b64(new Uint8Array(bits));
 }
 async function newPassword(password: string) {
