@@ -10,7 +10,7 @@ run_worker_first = ["/api/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "verix-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "fdc8c43c-3283-4b45-a2dd-4bea01bc14ac"
 
 [vars]
 APP_NAME = "VERIX"
