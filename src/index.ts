@@ -163,7 +163,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (path === "/api/admin/numbers" && request.method === "GET") {
     const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
-    const rows = await env.DB.prepare("SELECT n.id,n.phone_e164,n.country_code,n.label,n.provider,n.status,a.user_id,u.email AS assigned_email FROM phone_numbers n LEFT JOIN number_assignments a ON a.number_id=n.id LEFT JOIN users u ON u.id=a.user_id ORDER BY n.created_at DESC LIMIT 200").all();
+    const rows = await env.DB.prepare("SELECT n.id,n.phone_e164,n.country_code,n.label,n.provider,n.status,a.user_id,u.email AS assigned_email,m.number_type,m.provider_status,m.inbound_enabled,p.display_name AS provider_name FROM phone_numbers n LEFT JOIN number_assignments a ON a.number_id=n.id LEFT JOIN users u ON u.id=a.user_id LEFT JOIN number_metadata m ON m.number_id=n.id LEFT JOIN provider_accounts p ON p.id=m.provider_id ORDER BY n.created_at DESC LIMIT 200").all();
     return json({ numbers: rows.results || [] });
   }
 
@@ -199,12 +199,15 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     if (typeof body.providerNumberId !== "string" || !body.providerNumberId.trim()) return json({ error: "Provider number ID is required for provider-backed inventory" }, 400);
     const id = uid();
     try {
-      await env.DB.prepare("INSERT INTO phone_numbers(id,phone_e164,country_code,label,provider,status) VALUES(?,?,?,?,?,'active')")
-        .bind(id, body.phone, body.countryCode, (body.label || "").slice(0,80), provider.slug).run();
-      await env.DB.prepare("INSERT INTO number_metadata(number_id,number_type,provider_id,provider_number_id,provider_status,inbound_enabled,public_access) VALUES(?,?,?,?, 'pending',0,?)")
-        .bind(id, numberType, provider.id, body.providerNumberId.trim().slice(0,160), numberType === "public" ? 1 : 0).run();
-      if (body.customerId) await env.DB.prepare("INSERT INTO number_assignments(number_id,user_id) VALUES(?,?)").bind(id, body.customerId).run();
-    } catch { return json({ error: "Could not add number; it may already exist or assignment failed" }, 409); }
+      const statements = [
+        env.DB.prepare("INSERT INTO phone_numbers(id,phone_e164,country_code,label,provider,status) VALUES(?,?,?,?,?,'active')")
+          .bind(id, body.phone, body.countryCode, (body.label || "").slice(0,80), provider.slug),
+        env.DB.prepare("INSERT INTO number_metadata(number_id,number_type,provider_id,provider_number_id,provider_status,inbound_enabled,public_access) VALUES(?,?,?,?, 'pending',0,?)")
+          .bind(id, numberType, provider.id, body.providerNumberId.trim().slice(0,160), numberType === "public" ? 1 : 0)
+      ];
+      if (body.customerId) statements.push(env.DB.prepare("INSERT INTO number_assignments(number_id,user_id) VALUES(?,?)").bind(id, body.customerId));
+      await env.DB.batch(statements);
+    } catch { return json({ error: "Could not add number; no partial inventory was saved. Check for duplicate numbers or assignment conflicts." }, 409); }
     await audit(env, auth.user.id, "number.inventory.create", id);
     return json({ success: true, numberId: id, numberType, providerStatus: "pending", message: "Inventory saved, but SMS receiving remains disabled until provider verification." }, 201);
   }
