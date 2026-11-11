@@ -1,0 +1,17 @@
+name = "verix-otp-platform"
+main = "src/index.ts"
+compatibility_date = "2026-11-11"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "verix-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[vars]
+APP_NAME = "VERIX"
+SESSION_TTL_HOURS = "24"
