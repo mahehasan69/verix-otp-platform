@@ -124,18 +124,18 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/me" && request.method === "GET") {
-    const auth = await requireUser(request, env); if ("response" in auth) return auth.response;
+    const auth = await requireUser(request, env); if (auth.response) return auth.response;
     return json({ user: { id: auth.user.id, email: auth.user.email, displayName: auth.user.display_name, role: auth.user.role } });
   }
 
   if (path === "/api/admin/providers" && request.method === "GET") {
-    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const auth = await requireAdmin(request, env); if (auth.response) return auth.response;
     const rows = await env.DB.prepare("SELECT id,slug,display_name,status,integration_type,created_at FROM provider_accounts ORDER BY created_at DESC").all();
     return json({ providers: rows.results || [] });
   }
 
   if (path === "/api/admin/providers" && request.method === "POST") {
-    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const auth = await requireAdmin(request, env); if (auth.response) return auth.response;
     const body = await request.json<{slug?:string;displayName?:string;integrationType?:string}>().catch(() => ({} as never));
     if (typeof body.slug !== "string" || !/^[a-z0-9][a-z0-9-]{1,39}$/.test(body.slug) ||
         typeof body.displayName !== "string" || body.displayName.trim().length < 2 ||
@@ -157,19 +157,19 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/admin/users" && request.method === "GET") {
-    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const auth = await requireAdmin(request, env); if (auth.response) return auth.response;
     const rows = await env.DB.prepare("SELECT id,email,display_name,role,status,created_at FROM users ORDER BY created_at DESC LIMIT 200").all();
     return json({ users: rows.results || [] });
   }
 
   if (path === "/api/admin/numbers" && request.method === "GET") {
-    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const auth = await requireAdmin(request, env); if (auth.response) return auth.response;
     const rows = await env.DB.prepare("SELECT n.id,n.phone_e164,n.country_code,n.label,n.provider,n.status,a.user_id,u.email AS assigned_email,m.number_type,m.provider_status,m.inbound_enabled,p.display_name AS provider_name FROM phone_numbers n LEFT JOIN number_assignments a ON a.number_id=n.id LEFT JOIN users u ON u.id=a.user_id LEFT JOIN number_metadata m ON m.number_id=n.id LEFT JOIN provider_accounts p ON p.id=m.provider_id ORDER BY n.created_at DESC LIMIT 200").all();
     return json({ numbers: rows.results || [] });
   }
 
   if (path === "/api/admin/users" && request.method === "POST") {
-    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const auth = await requireAdmin(request, env); if (auth.response) return auth.response;
     const body = await request.json<{email?:string;displayName?:string;password?:string}>().catch(() => ({} as never));
     if (!validEmail(body.email) || !validPassword(body.password) || typeof body.displayName !== "string" || body.displayName.trim().length < 2) {
       return json({ error: "Provide valid email, display name, and a password of at least 12 characters" }, 400);
@@ -184,7 +184,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/admin/numbers" && request.method === "POST") {
-    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const auth = await requireAdmin(request, env); if (auth.response) return auth.response;
     const body = await request.json<{phone?:string;countryCode?:string;label?:string;providerId?:string;providerNumberId?:string;numberType?:string;customerId?:string}>().catch(() => ({} as never));
     if (typeof body.phone !== "string" || !/^\+[1-9]\d{7,14}$/.test(body.phone) || typeof body.countryCode !== "string" || !/^\+?\d{1,4}$/.test(body.countryCode)) {
       return json({ error: "Use an E.164 phone number and valid country code" }, 400);
@@ -229,7 +229,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/api/messages" && request.method === "GET") {
-    const auth = await requireUser(request, env); if ("response" in auth) return auth.response;
+    const auth = await requireUser(request, env); if (auth.response) return auth.response;
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 50)));
     const rows = auth.user.role === "admin"
       ? await env.DB.prepare("SELECT m.id,n.phone_e164,m.sender,m.body,m.received_at,md.number_type FROM inbound_messages m JOIN phone_numbers n ON n.id=m.number_id JOIN number_metadata md ON md.number_id=n.id ORDER BY m.received_at DESC LIMIT ?").bind(limit).all()
