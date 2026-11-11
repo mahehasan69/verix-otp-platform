@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101827"><title>VERIX — Private SMS Inbox</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1220;--panel:#111c2e;--line:#26364e;--muted:#91a3bb;--text:#edf4ff;--blue:#62a9ff;--green:#51d6a0}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 20% 0,#152b49 0,transparent 45%),var(--bg);color:var(--text);font:15px/1.5 Inter,system-ui,sans-serif;min-height:100vh}
+main{max-width:1040px;margin:auto;padding:32px 18px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}.brand{font-size:24px;font-weight:850;letter-spacing:.16em}.brand span{color:var(--blue)}.tag{color:var(--muted);font-size:12px}
+.card{background:linear-gradient(145deg,#142238,#101a2b);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:0 18px 60px #0003}.auth{max-width:420px;margin:9vh auto}.eyebrow{color:var(--blue);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}h1{font-size:26px;margin:8px 0}p{color:var(--muted)}label{display:block;font-size:13px;margin:18px 0 7px;color:#c4d2e5}input{width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:10px;background:#0b1423;color:var(--text);outline:none}input:focus{border-color:var(--blue)}button{border:0;border-radius:10px;padding:12px 16px;background:var(--blue);color:#071322;font-weight:800;cursor:pointer}button.secondary{background:#22334b;color:var(--text)}.wide{width:100%;margin-top:20px}.hidden{display:none!important}.notice{margin-top:14px;color:#ffb7b7;font-size:13px}.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:18px 0}.stat{background:#0c1728;border:1px solid var(--line);padding:17px;border-radius:13px}.stat strong{font-size:25px;display:block}.stat small{color:var(--muted)}.tablewrap{overflow:auto;margin-top:16px}table{width:100%;border-collapse:collapse;min-width:620px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}td.message{max-width:450px;white-space:pre-wrap;overflow-wrap:anywhere}.pill{font-size:11px;border:1px solid #285a4b;color:var(--green);border-radius:99px;padding:4px 9px}.empty{text-align:center;padding:45px 10px;color:var(--muted)}footer{text-align:center;color:#71839b;font-size:12px;padding:28px}
+@media(max-width:620px){main{padding:20px 13px}.card{padding:18px}.stats{grid-template-columns:1fr 1fr}.brand{font-size:20px}}
+</style>
+</head>
+<body><main>
+<header class="top"><div class="brand">VER<span>IX</span></div><div class="tag">PRIVATE SMS RECEIVING</div></header>
+<section id="login" class="card auth">
+<div class="eyebrow">Secure workspace</div><h1>Welcome back</h1><p>Sign in to access your authorized SMS inbox.</p>
+<form id="loginForm"><label for="email">Email address</label><input id="email" type="email" autocomplete="username" required><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required><button class="wide" type="submit">Sign in securely</button><div id="loginError" class="notice"></div></form>
+</section>
+<section id="dashboard" class="hidden">
+<div class="card"><div class="bar"><div><div class="eyebrow">Workspace</div><h1 id="welcome">Message inbox</h1><p id="roleText">Your authorized incoming messages.</p></div><div class="bar"><span class="pill">Private access</span><button id="logout" class="secondary">Sign out</button></div></div>
+<div class="stats"><div class="stat"><strong id="messageCount">0</strong><small>Visible messages</small></div><div class="stat"><strong id="roleValue">—</strong><small>Account role</small></div><div class="stat"><strong>Protected</strong><small>Access scope</small></div></div>
+<div class="bar"><h2>Incoming SMS</h2><button id="refresh" class="secondary">Refresh inbox</button></div>
+<div class="tablewrap"><table><thead><tr><th>Received</th><th>Number</th><th>Sender</th><th>Message</th></tr></thead><tbody id="messages"></tbody></table><div id="empty" class="empty">No messages yet. Incoming messages for your authorized numbers will appear here.</div></div>
+</div></section>
+<footer>VERIX · Messages are private and visible only to authorized accounts.</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+async function api(path,options={}){const r=await fetch(path,{...options,headers:{'content-type':'application/json',...(options.headers||{})},credentials:'same-origin'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Request failed');return d}
+function show(id){$('login').classList.toggle('hidden',id!=='login');$('dashboard').classList.toggle('hidden',id!=='dashboard')}
+async function loadMessages(){const d=await api('/api/messages');$('messageCount').textContent=d.messages.length;$('messages').innerHTML='';$('empty').classList.toggle('hidden',d.messages.length>0);for(const m of d.messages){const tr=document.createElement('tr');for(const value of [new Date(m.received_at+'Z').toLocaleString(),m.phone_e164,m.sender,m.body]){const td=document.createElement('td');td.textContent=value;if(value===m.body)td.className='message';tr.appendChild(td)}$('messages').appendChild(tr)}}
+async function boot(){try{const d=await api('/api/me');$('welcome').textContent='Hello, '+d.user.displayName;$('roleText').textContent=d.user.role==='admin'?'Administrator view · all registered numbers':'Customer view · assigned numbers only';$('roleValue').textContent=d.user.role;show('dashboard');await loadMessages()}catch{show('login')}}
+$('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginError').textContent='';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify({email:$('email').value,password:$('password').value})});await boot()}catch(err){$('loginError').textContent=err.message}});
+$('logout').addEventListener('click',async()=>{await api('/api/auth/logout',{method:'POST'});show('login')});
+$('refresh').addEventListener('click',()=>loadMessages().catch(e=>alert(e.message)));
+boot();
+</script></body></html>
