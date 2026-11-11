@@ -127,6 +127,34 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ user: { id: auth.user.id, email: auth.user.email, displayName: auth.user.display_name, role: auth.user.role } });
   }
 
+  if (path === "/api/admin/providers" && request.method === "GET") {
+    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const rows = await env.DB.prepare("SELECT id,slug,display_name,status,integration_type,created_at FROM provider_accounts ORDER BY created_at DESC").all();
+    return json({ providers: rows.results || [] });
+  }
+
+  if (path === "/api/admin/providers" && request.method === "POST") {
+    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const body = await request.json<{slug?:string;displayName?:string;integrationType?:string}>().catch(() => ({}));
+    if (typeof body.slug !== "string" || !/^[a-z0-9][a-z0-9-]{1,39}$/.test(body.slug) ||
+        typeof body.displayName !== "string" || body.displayName.trim().length < 2 ||
+        !["webhook","manual"].includes(body.integrationType || "webhook")) {
+      return json({ error: "Provide a provider slug, display name, and integration type (webhook or manual)" }, 400);
+    }
+    const id = uid();
+    try {
+      await env.DB.prepare("INSERT INTO provider_accounts(id,slug,display_name,integration_type,status) VALUES(?,?,?,?,'pending')")
+        .bind(id, body.slug, body.displayName.trim().slice(0,80), body.integrationType || "webhook").run();
+    } catch { return json({ error: "Provider slug already exists or could not be created" }, 409); }
+    await audit(env, auth.user.id, "provider.register", id);
+    return json({ success: true, providerId: id, status: "pending", message: "Provider registered as pending. No numbers are live until provider access and webhook verification are completed." }, 201);
+  }
+
+  if (path === "/api/public/numbers" && request.method === "GET") {
+    const rows = await env.DB.prepare("SELECT n.id,n.phone_e164,n.country_code,n.label,m.number_type,m.provider_status FROM phone_numbers n JOIN number_metadata m ON m.number_id=n.id WHERE n.status='active' AND m.number_type='public' AND m.public_access=1 AND m.provider_status='active' AND m.inbound_enabled=1 ORDER BY n.created_at DESC LIMIT 100").all();
+    return json({ numbers: rows.results || [] });
+  }
+
   if (path === "/api/admin/users" && request.method === "GET") {
     const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
     const rows = await env.DB.prepare("SELECT id,email,display_name,role,status,created_at FROM users ORDER BY created_at DESC LIMIT 200").all();
@@ -156,24 +184,29 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (path === "/api/admin/numbers" && request.method === "POST") {
     const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
-    const body = await request.json<{phone?:string;countryCode?:string;label?:string;provider?:string;customerId?:string}>().catch(() => ({}));
+    const body = await request.json<{phone?:string;countryCode?:string;label?:string;providerId?:string;providerNumberId?:string;numberType?:string;customerId?:string}>().catch(() => ({}));
     if (typeof body.phone !== "string" || !/^\+[1-9]\d{7,14}$/.test(body.phone) || typeof body.countryCode !== "string" || !/^\+?\d{1,4}$/.test(body.countryCode)) {
       return json({ error: "Use an E.164 phone number and valid country code" }, 400);
     }
-    if (body.customerId) {
-      const customer = await env.DB.prepare("SELECT id FROM users WHERE id=? AND role='customer' AND status='active'").bind(body.customerId).first();
-      if (!customer) return json({ error: "Customer not found" }, 404);
-    }
+    const numberType = body.numberType || "private";
+    if (!["public","private"].includes(numberType)) return json({ error: "numberType must be public or private" }, 400);
+    if (numberType === "public" && body.customerId) return json({ error: "Public shared numbers cannot be assigned to one customer" }, 400);
+    if (numberType === "private" && !body.customerId) return json({ error: "Private numbers must be assigned to one customer" }, 400);
+    const customer = body.customerId ? await env.DB.prepare("SELECT id FROM users WHERE id=? AND role='customer' AND status='active'").bind(body.customerId).first() : null;
+    if (body.customerId && !customer) return json({ error: "Customer not found" }, 404);
+    const provider = body.providerId ? await env.DB.prepare("SELECT id,slug,status FROM provider_accounts WHERE id=?").bind(body.providerId).first<{id:string;slug:string;status:string}>() : null;
+    if (!provider || provider.status !== "active") return json({ error: "Select an active, verified provider. Pending/manual numbers cannot receive live SMS." }, 409);
+    if (typeof body.providerNumberId !== "string" || !body.providerNumberId.trim()) return json({ error: "Provider number ID is required for provider-backed inventory" }, 400);
     const id = uid();
     try {
-      await env.DB.prepare("INSERT INTO phone_numbers(id,phone_e164,country_code,label,provider) VALUES(?,?,?,?,?)")
-        .bind(id, body.phone, body.countryCode, (body.label || "").slice(0,80), (body.provider || "manual").slice(0,40)).run();
-      if (body.customerId) {
-        await env.DB.prepare("INSERT INTO number_assignments(number_id,user_id) VALUES(?,?)").bind(id, body.customerId).run();
-      }
+      await env.DB.prepare("INSERT INTO phone_numbers(id,phone_e164,country_code,label,provider,status) VALUES(?,?,?,?,?,'active')")
+        .bind(id, body.phone, body.countryCode, (body.label || "").slice(0,80), provider.slug).run();
+      await env.DB.prepare("INSERT INTO number_metadata(number_id,number_type,provider_id,provider_number_id,provider_status,inbound_enabled,public_access) VALUES(?,?,?,?, 'pending',0,?)")
+        .bind(id, numberType, provider.id, body.providerNumberId.trim().slice(0,160), numberType === "public" ? 1 : 0).run();
+      if (body.customerId) await env.DB.prepare("INSERT INTO number_assignments(number_id,user_id) VALUES(?,?)").bind(id, body.customerId).run();
     } catch { return json({ error: "Could not add number; it may already exist or assignment failed" }, 409); }
-    await audit(env, auth.user.id, "number.create", id);
-    return json({ success: true, numberId: id }, 201);
+    await audit(env, auth.user.id, "number.inventory.create", id);
+    return json({ success: true, numberId: id, numberType, providerStatus: "pending", message: "Inventory saved, but SMS receiving remains disabled until provider verification." }, 201);
   }
 
   if (path === "/api/inbound/sms" && request.method === "POST") {
@@ -182,8 +215,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     if (typeof body.from !== "string" || typeof body.to !== "string" || typeof body.body !== "string" || body.body.length > 5000) {
       return json({ error: "Invalid inbound SMS payload" }, 400);
     }
-    const number = await env.DB.prepare("SELECT id FROM phone_numbers WHERE phone_e164=? AND status='active'").bind(body.to).first<{id:string}>();
-    if (!number) return json({ error: "Recipient number is not registered" }, 404);
+    const number = await env.DB.prepare("SELECT n.id FROM phone_numbers n JOIN number_metadata m ON m.number_id=n.id JOIN provider_accounts p ON p.id=m.provider_id WHERE n.phone_e164=? AND n.status='active' AND m.provider_status='active' AND m.inbound_enabled=1 AND p.status='active'").bind(body.to).first<{id:string}>();
+    if (!number) return json({ error: "Recipient number is not registered with an active, verified inbound provider" }, 404);
     try {
       await env.DB.prepare("INSERT INTO inbound_messages(id,provider_message_id,number_id,sender,body) VALUES(?,?,?,?,?)")
         .bind(uid(), body.providerMessageId || null, number.id, body.from.slice(0,32), body.body).run();
@@ -195,8 +228,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     const auth = await requireUser(request, env); if ("response" in auth) return auth.response;
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 50)));
     const rows = auth.user.role === "admin"
-      ? await env.DB.prepare("SELECT m.id,n.phone_e164,m.sender,m.body,m.received_at FROM inbound_messages m JOIN phone_numbers n ON n.id=m.number_id ORDER BY m.received_at DESC LIMIT ?").bind(limit).all()
-      : await env.DB.prepare("SELECT m.id,n.phone_e164,m.sender,m.body,m.received_at FROM inbound_messages m JOIN phone_numbers n ON n.id=m.number_id JOIN number_assignments a ON a.number_id=n.id WHERE a.user_id=? ORDER BY m.received_at DESC LIMIT ?").bind(auth.user.id, limit).all();
+      ? await env.DB.prepare("SELECT m.id,n.phone_e164,m.sender,m.body,m.received_at,md.number_type FROM inbound_messages m JOIN phone_numbers n ON n.id=m.number_id JOIN number_metadata md ON md.number_id=n.id ORDER BY m.received_at DESC LIMIT ?").bind(limit).all()
+      : await env.DB.prepare("SELECT m.id,n.phone_e164,m.sender,m.body,m.received_at,md.number_type FROM inbound_messages m JOIN phone_numbers n ON n.id=m.number_id JOIN number_metadata md ON md.number_id=n.id LEFT JOIN number_assignments a ON a.number_id=n.id WHERE (md.number_type='public' AND md.public_access=1 AND md.provider_status='active') OR (md.number_type='private' AND a.user_id=?) ORDER BY m.received_at DESC LIMIT ?").bind(auth.user.id, limit).all();
     return json({ messages: rows.results || [] });
   }
 
