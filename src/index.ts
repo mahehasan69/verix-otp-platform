@@ -122,6 +122,18 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     return json({ user: { id: auth.user.id, email: auth.user.email, displayName: auth.user.display_name, role: auth.user.role } });
   }
 
+  if (path === "/api/admin/users" && request.method === "GET") {
+    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const rows = await env.DB.prepare("SELECT id,email,display_name,role,status,created_at FROM users ORDER BY created_at DESC LIMIT 200").all();
+    return json({ users: rows.results || [] });
+  }
+
+  if (path === "/api/admin/numbers" && request.method === "GET") {
+    const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
+    const rows = await env.DB.prepare("SELECT n.id,n.phone_e164,n.country_code,n.label,n.provider,n.status,a.user_id,u.email AS assigned_email FROM phone_numbers n LEFT JOIN number_assignments a ON a.number_id=n.id LEFT JOIN users u ON u.id=a.user_id ORDER BY n.created_at DESC LIMIT 200").all();
+    return json({ numbers: rows.results || [] });
+  }
+
   if (path === "/api/admin/users" && request.method === "POST") {
     const auth = await requireAdmin(request, env); if ("response" in auth) return auth.response;
     const body = await request.json<{email?:string;displayName?:string;password?:string}>().catch(() => ({}));
